@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Run From Simulator</title>
+<style>
+body {
+    margin: 0;
+    overflow: hidden;
+    background: #222;
+    color: white;
+    font-family: 'Courier New', monospace;
+}
+canvas {
+    display: block;
+    background: #333;
+}
+#ui-layer {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none;
+}
+.interactive { pointer-events: auto; text-align: center; }
+button {
+    padding: 15px 30px;
+    margin: 10px;
+    font-size: 18px;
+    font-family: inherit;
+    background: #ff4444;
+    border: 2px solid white;
+    color: white;
+    cursor: pointer;
+}
+button:hover { background: #ff0000; transform: scale(1.05); }
+#hud {
+    position: absolute;
+    top: 10px;
+    left: 20px;
+    font-size: 22px;
+    display: none;
+}
+</style>
+</head>
+<body>
+
+<div id="hud">Score: <span id="score">0</span></div>
+
+<div id="ui-layer">
+    <div id="menu" class="interactive">
+        <h1>CHOOSE YOUR FATE</h1>
+        <button onclick="startGame('mode1')">
+            RUN FROM KANYE SIMULATOR
+        </button>
+        <button onclick="startGame('mode2')">
+            RUN FROM GLOBGLOGABGALAB SIMULATOR
+        </button>
+    </div>
+
+    <div id="game-over" class="interactive" style="display:none">
+        <h1 id="go-title"></h1>
+        <h2 id="go-score"></h2>
+        <div id="leaderboard"></div>
+        <button onclick="returnToMenu()">MAIN MENU</button>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+// Fix: Handle window resizing dynamically
+canvas.width = innerWidth;
+canvas.height = innerHeight;
+window.onresize = () => {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+};
+
+let gameState = "MENU";
+let modeData = {};
+let startTime = 0;
+let score = 0;
+
+const music = new Audio();
+
+const modes = {
+    mode1: {
+        title: "RUN FROM KANYE", // Updated to match button text
+        collectible: "🎤",
+        song: "song1.mp3",
+        enemyImage: "floatinghead1.jpg",
+        target: 25
+    },
+    mode2: {
+        title: "RUN FROM GLOBGLOGABGALAB", // Updated to match button text
+        collectible: "📚",
+        song: "song2.mp3",
+        enemyImage: "floatinghead2.jpg",
+        target: 25
+    }
+};
+
+// Define initial states separately so we can restore them
+const initialPlayerState = { x: 300, y: 300, size: 30, speed: 5 };
+const initialEnemyState = { x: -100, y: -100, size: 70, speed: 3 };
+
+// Use spread operator to create copies, not references
+let player = { ...initialPlayerState };
+let enemy = { ...initialEnemyState };
+let item = { x: 0, y: 0 };
+
+const keys = {};
+addEventListener("keydown", e => {
+    // Fix: Prevent browser scrolling when using arrow keys
+    if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].indexOf(e.code) > -1) {
+        e.preventDefault();
+    }
+    keys[e.key] = true;
+});
+addEventListener("keyup", e => keys[e.key] = false);
+
+const enemyImg = new Image();
+
+function spawnItem() {
+    // Fix: Ensure item doesn't spawn too close to edges
+    item.x = Math.random() * (canvas.width - 100) + 50;
+    item.y = Math.random() * (canvas.height - 100) + 50;
+}
+
+function startGame(modeKey) {
+    modeData = modes[modeKey];
+    enemyImg.src = modeData.enemyImage;
+    
+    // Fix: Reset Player and Enemy positions
+    player = { ...initialPlayerState };
+    // Center player roughly
+    player.x = canvas.width / 2;
+    player.y = canvas.height / 2;
+    
+    enemy = { ...initialEnemyState }; // Reset enemy to corner
+
+    music.src = modeData.song;
+    music.loop = true;
+    music.play().catch(e => console.log("Audio play failed (interaction required first)"));
+
+    score = 0;
+    startTime = Date.now();
+    spawnItem();
+
+    document.getElementById("menu").style.display = "none";
+    document.getElementById("game-over").style.display = "none";
+    document.getElementById("hud").style.display = "block";
+    document.getElementById("score").innerText = `0 / ${modeData.target}`;
+
+    gameState = "PLAYING";
+    requestAnimationFrame(loop);
+}
+
+function endGame(win) {
+    gameState = "GAMEOVER";
+    music.pause();
+    music.currentTime = 0; // Rewind song
+
+    document.getElementById("hud").style.display = "none";
+    document.getElementById("game-over").style.display = "block";
+
+    // Fix: Keep time as a number for math, format string for display
+    const rawTime = (Date.now() - startTime) / 1000;
+    const displayTime = rawTime.toFixed(2);
+
+    document.getElementById("go-title").innerText = win ? "VICTORY!" : "CAUGHT!";
+    document.getElementById("go-score").innerText =
+        win ? `Finished in ${displayTime}s` : `Score: ${score}`;
+
+    // Fix: Only record high score if the player actually WON
+    if (win) {
+        handleHighScore(rawTime);
+    } else {
+        // Just show current leaderboard without adding new entry
+        displayLeaderboard(); 
+    }
+}
+
+function getLeaderboardKey() {
+    return "leaderboard_" + modeData.title.replace(/\s/g, "");
+}
+
+function handleHighScore(rawTime) {
+    const key = getLeaderboardKey();
+    let board = JSON.parse(localStorage.getItem(key)) || [];
+
+    // Fix: Ensure we are comparing Numbers, not strings
+    if (board.length < 5 || rawTime < board[board.length - 1].time) {
+        const name = prompt("You made the leaderboard! Enter username:") || "Anonymous";
+        // Store rawTime as number
+        board.push({ name, time: parseFloat(rawTime) });
+        board.sort((a,b) => a.time - b.time);
+        board = board.slice(0,5);
+        localStorage.setItem(key, JSON.stringify(board));
+    }
+    displayLeaderboard();
+}
+
+function displayLeaderboard() {
+    const key = getLeaderboardKey();
+    let board = JSON.parse(localStorage.getItem(key)) || [];
+    
+    let html = "<h3>Leaderboard (Fastest Times)</h3>";
+    if(board.length === 0) html += "No records yet!";
+    
+    board.forEach((e,i)=> {
+        html += `${i+1}. ${e.name} - ${parseFloat(e.time).toFixed(2)}s<br>`;
+    });
+    document.getElementById("leaderboard").innerHTML = html;
+}
+
+function returnToMenu() {
+    gameState = "MENU";
+    document.getElementById("menu").style.display = "block";
+    document.getElementById("game-over").style.display = "none";
+}
+
+function update() {
+    // Movement with Boundary Checks
+    if (keys["ArrowUp"] || keys["w"]) player.y -= player.speed;
+    if (keys["ArrowDown"] || keys["s"]) player.y += player.speed;
+    if (keys["ArrowLeft"] || keys["a"]) player.x -= player.speed;
+    if (keys["ArrowRight"] || keys["d"]) player.x += player.speed;
+
+    // Fix: Clamp player to screen
+    if (player.x < 0) player.x = 0;
+    if (player.x > canvas.width - player.size) player.x = canvas.width - player.size;
+    if (player.y < 0) player.y = 0;
+    if (player.y > canvas.height - player.size) player.y = canvas.height - player.size;
+
+    // Enemy AI
+    const dx = player.x - enemy.x;
+    const dy = player.y - enemy.y;
+    const dist = Math.hypot(dx, dy);
+    
+    if(dist > 0) {
+        enemy.x += dx / dist * enemy.speed;
+        enemy.y += dy / dist * enemy.speed;
+    }
+
+    // Item Collision
+    if (Math.hypot(player.x - item.x, player.y - item.y) < 30) {
+        score++;
+        spawnItem();
+        document.getElementById("score").innerText = `${score} / ${modeData.target}`;
+        if (score >= modeData.target) endGame(true);
+    }
+
+    // Enemy Collision
+    if (
+        player.x < enemy.x + enemy.size &&
+        player.x + player.size > enemy.x &&
+        player.y < enemy.y + enemy.size &&
+        player.y + player.size > enemy.y
+    ) {
+        endGame(false);
+    }
+}
+
+function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // Draw Item
+    ctx.font = "32px Arial";
+    ctx.fillText(modeData.collectible, item.x, item.y);
+
+    // Draw Player
+    ctx.fillStyle = "#00ccff";
+    ctx.fillRect(player.x, player.y, player.size, player.size);
+
+    // Draw Enemy
+    // Safety check: if image isn't loaded, draw a red box so game is still playable
+    if (enemyImg.complete && enemyImg.naturalHeight !== 0) {
+        ctx.drawImage(enemyImg, enemy.x, enemy.y, enemy.size, enemy.size);
+    } else {
+        ctx.fillStyle = "red";
+        ctx.fillRect(enemy.x, enemy.y, enemy.size, enemy.size);
+    }
+}
+
+function loop() {
+    if (gameState !== "PLAYING") return;
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
